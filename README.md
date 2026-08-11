@@ -1,20 +1,9 @@
-# QEMU-iOS
+# QEMU-iOS for the Samsung Galaxy Young 2 running postmarketOS
 
-QEMU-iOS is an emulator for legacy Apple devices.
-Currently, the iPod Touch 1G and iPod Touch 2G are supported.
+This repository is a fork of [devos50/qemu-ios](https://github.com/devos50/qemu-ios) focused on running the iPod Touch 2G emulator on the Samsung Galaxy Young 2 under postmarketOS.
 
-<img width="331" alt="it2g-qemu" src="https://github.com/devos50/qemu-ios/assets/1707075/9bf7f6c1-5918-47e9-bb3e-2e39ae15d519">
+If you need to install postmarketOS on your Young 2, refer to this [postmarketOS Young 2 repository](https://github.com/integersys/postmarketos-young2/).
 
-The schematic below shows the most important hardware components of the iPod Touch 2G and their interactions.
-The schematic for the iPod Touch 1G is mostly similar.
+The original QEMU-iOS project emulates legacy Apple devices, including the iPod Touch 1G and iPod Touch 2G.
 
-<img width="80%" alt="it2g-schematic" src="https://github.com/devos50/qemu-ios/assets/1707075/4b8eca9a-74b0-4590-ad23-bc056acde434">
-
-### Running the iPod Touch 1G
-
-Instructions on how to run the iPod Touch 1G emulator can be found [here](https://devos50.github.io/blog/2022/ipod-touch-qemu-pt2/).
-A technical blog post with more information about the peripherals and reverse engineering process is published [here](https://devos50.github.io/blog/2022/ipod-touch-qemu/).
-
-### Running the iPod Touch 2G
-
-Instructions on how to run the iPod Touch 2G emulator can be found [here](https://github.com/devos50/qemu-ios/blob/ipod_touch_2g/RUNNING.md).
+This fork includes the changes made for the best experience QEMU-iOS can offer on a Samsung Galaxy Young 2.
