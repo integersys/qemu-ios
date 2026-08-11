@@ -79,20 +79,29 @@ static void lcd_invalidate(void *opaque)
 
 static void draw_line32_32(void *opaque, uint8_t *d, const uint8_t *s, int width, int deststep)
 {
-    // IPodTouchLCDState *lcd = (IPodTouchLCDState *) opaque;
     uint8_t r, g, b;
+    uint32_t br = lcd_brightness;
+
+    if (br == 255) {
+        do {
+            b = s[0];
+            g = s[1];
+            r = s[2];
+            ((uint32_t *) d)[0] = rgb_to_pixel32(r, g, b);
+            s += 4;
+            d += 4;
+        } while (--width != 0);
+        return;
+    }
 
     do {
-        //v = lduw_le_p((void *) s);
-        //printf("V: %d\n", *s);
         b = s[0];
         g = s[1];
         r = s[2];
-        // printf("R: %d, G: %d, B: %d, A: %d\n", r, g, b, lcd_brightness);
-        ((uint32_t *) d)[0] = rgb_to_pixel32(round((float)r * ((float)lcd_brightness / 255.0f)), round((float)g * ((float)lcd_brightness / 255.0f)), round((float)b * ((float)lcd_brightness / 255.0f)));
+        ((uint32_t *) d)[0] = rgb_to_pixel32((r * br + 127) / 255, (g * br + 127) / 255, (b * br + 127) / 255);
         s += 4;
         d += 4;
-    } while (-- width != 0);
+    } while (--width != 0);
 }
 
 static void lcd_refresh(void *opaque)
@@ -116,7 +125,6 @@ static void lcd_refresh(void *opaque)
     first = last = 0;
     width = 320;
     height = 480;
-    lcd->invalidate = 1;
 
     src_width =  4 * width;
     linesize = surface_stride(surface);
@@ -165,9 +173,15 @@ static void ipod_touch_lcd_mouse_event(void *opaque, int x, int y, int z, int bu
     lcd->mt->touch_y = fy;
 
     if(buttons_state && !lcd->mt->touch_down) {
+        fprintf(stderr, "INPUTTRACE DOWN raw_x=%d raw_y=%d fx=%.6f fy=%.6f
+", x, y, fx, fy);
+        fflush(stderr);
         ipod_touch_multitouch_on_touch(lcd->mt);
     }
     else if(!buttons_state && lcd->mt->touch_down) {
+        fprintf(stderr, "INPUTTRACE UP raw_x=%d raw_y=%d fx=%.6f fy=%.6f
+", x, y, fx, fy);
+        fflush(stderr);
         ipod_touch_multitouch_on_release(lcd->mt);
     }
 }
@@ -189,6 +203,7 @@ static void ipod_touch_lcd_realize(DeviceState *dev, Error **errp)
     IPodTouchLCDState *s = IPOD_TOUCH_LCD(dev);
     s->con = graphic_console_init(dev, 0, &gfx_ops, s);
     qemu_console_resize(s->con, 320, 480);
+    s->invalidate = 1;
 
     // add mouse handler
     qemu_add_mouse_event_handler(ipod_touch_lcd_mouse_event, s, 1, "iPod Touch Touchscreen");
