@@ -92,10 +92,12 @@ static void prepare_short_control_response(IPodTouchMultitouchState *s, uint8_t 
         s->out_buffer[7] = (MT_BCD_VERSION >> 8) & 0xFF;
     }
     else if(report_id == MT_REPORT_SENSOR_REGION_DESC) {
-        s->out_buffer[3] = MT_SENSOR_REGION_DESC;
+        const uint8_t region_desc[8] = {0x01, 0x01, 0x00, 0x0f, 0x01, 0x00, 0x0a, 0x00};
+        memcpy(&s->out_buffer[3], region_desc, sizeof(region_desc));
     }
     else if(report_id == MT_REPORT_SENSOR_REGION_PARAM) {
-        s->out_buffer[3] = MT_SENSOR_REGION_PARAM;
+        const uint8_t region_param[6] = {0x00, 0x00, 0x0c, 0x00, 0x00, 0x03};
+        memcpy(&s->out_buffer[3], region_param, sizeof(region_param));
     }
     else if(report_id == MT_REPORT_SENSOR_DIMENSIONS) {
         uint32_t *ob_int32 = (uint32_t *)&s->out_buffer[3];
