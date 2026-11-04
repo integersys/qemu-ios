@@ -173,14 +173,12 @@ static void ipod_touch_lcd_mouse_event(void *opaque, int x, int y, int z, int bu
     lcd->mt->touch_y = fy;
 
     if(buttons_state && !lcd->mt->touch_down) {
-        fprintf(stderr, "INPUTTRACE DOWN raw_x=%d raw_y=%d fx=%.6f fy=%.6f
-", x, y, fx, fy);
+        fprintf(stderr, "INPUTTRACE DOWN raw_x=%d raw_y=%d fx=%.6f fy=%.6f\n", x, y, fx, fy);
         fflush(stderr);
         ipod_touch_multitouch_on_touch(lcd->mt);
     }
     else if(!buttons_state && lcd->mt->touch_down) {
-        fprintf(stderr, "INPUTTRACE UP raw_x=%d raw_y=%d fx=%.6f fy=%.6f
-", x, y, fx, fy);
+        fprintf(stderr, "INPUTTRACE UP raw_x=%d raw_y=%d fx=%.6f fy=%.6f\n", x, y, fx, fy);
         fflush(stderr);
         ipod_touch_multitouch_on_release(lcd->mt);
     }
