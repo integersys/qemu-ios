@@ -29,6 +29,8 @@ OpenGL are out of scope for this task.
 The guest reaches SpringBoard and then takes a kernel data abort:
 
 ```
+PM notification timeout (pid 10, SpringBoard)
+PM notification timeout (pid 10, SpringBoard)
 kernel abort type 4: fault_type=0x3, fault_addr=0xec3fd01c
 pc: 0xc04fef28  lr: 0xc04ff6b0  r11: 0xc0b60240
 Debugger message: Fatal Exception
@@ -36,9 +38,16 @@ Debugger message: Fatal Exception
 
 `0xc0b60240` is the same object that appears earlier in the log as
 `AppleMPVDDriver[0xc0b60240]`, and the backtrace contains
-`AppleMPVDDriver::setPowerStateGated()`. The fault therefore occurs in the video
-decoder driver during a power-state transition, immediately after SpringBoard
-starts and before the LCD is programmed.
+`AppleMPVDDriver::setPowerStateGated()`. The fault occurs in the video decoder
+driver while handling a power-management notification for SpringBoard,
+immediately after SpringBoard starts and before the LCD is programmed.
+
+The boot was repeated after a full device power cycle and reproduced the same
+sequence and the same fault address, so the behaviour is deterministic.
+
+`hw/arm/ipod_touch_2g.c` instantiates no video decoder device at all; `mpvd`
+appears nowhere in `hw/` or `include/`. The driver therefore runs against
+unmapped guest physical addresses and reads zero from every register.
 
 The display is never initialised, which is why the framebuffer stays black. The
 guest does probe LCD registers that the emulator does not implement
@@ -47,7 +56,7 @@ zero for all of them.
 
 This is a guest-side crash reached through an incomplete emulation path. It is
 not a host configuration error: the same binary boots the same guest to the same
-point reproducibly.
+point reproducibly, and the same abort occurs after a clean host reboot.
 
 ## Guest memory size
 
@@ -72,13 +81,17 @@ repaired. Details are in `documentation/build.md`.
   upstream `n72ap_v1` image is available to the project.
 - Whether the unimplemented LCD registers are required for the panel to be
   programmed at all, or whether the abort happens first regardless.
-- How much of the abort is the known sleep/power issue that this task was asked
-  not to investigate.
+- Whether the abort is the known sleep/power problem, which this task was asked
+  not to investigate. The `PM notification timeout` lines and the
+  `setPowerStateGated` frame point at that subsystem.
 
 ## Next steps
 
-1. Confirm whether the same abort occurs with an iOS 3.1.3 NAND, which is the
+1. Determine whether the abort is specific to the power-management path, for
+   example by checking whether SpringBoard can reach its first draw when the
+   video decoder driver is prevented from registering.
+2. Confirm whether the same abort occurs with an iOS 3.1.3 NAND, which is the
    documented preferred guest target.
-2. Instrument the LCD register reads to return plausible values instead of zero,
+3. Instrument the LCD register reads to return plausible values instead of zero,
    and check whether the display initialises before the power-state transition.
-3. Only after the guest reaches the interface, revisit the sleep/wake problem.
+4. Only after the guest reaches the interface, revisit the sleep/wake problem.

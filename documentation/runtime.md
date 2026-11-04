@@ -98,7 +98,13 @@ userspace: launchd, lockdownd, configd, notifyd, SpringBoard
 
 Timing on the physical device is slow. Individual driver starts take tens of
 seconds; `AppleS5L8900XAES::start` reports 25,494 ms. Reaching SpringBoard takes
-roughly 13 minutes of wall clock time with the guest at 128 MB.
+roughly 13 minutes of wall clock time.
+
+Immediately after SpringBoard starts, the guest reports
+`PM notification timeout (pid 10, SpringBoard)` twice and then takes a kernel data
+abort inside `AppleMPVDDriver::setPowerStateGated()`. The LCD is never programmed,
+so the framebuffer remains black. `documentation/status.md` records the abort and
+the current understanding of it.
 
 The known sleep and wake behaviour was not investigated in this task and remains
 open.
