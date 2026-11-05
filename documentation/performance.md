@@ -128,11 +128,11 @@ Neither change was kept. The only DSI change retained is the removal of the
 per-write `fprintf`, which emitted one line per register write and serves no
 purpose during normal operation.
 
-The conclusion is that the transmit-clock bit is not a simple busy flag. It has
-to be asserted during panel initialisation, released when the guest stops the
-high-speed clock, and re-asserted when the clock restarts, with the panel state
-machine following it. A one-bit change to the status register cannot express
-that.
+Both experiments were attempts to derive the bit from a single hardcoded event.
+The maintained upstream tree already models it properly, by deriving
+`TxReadyHsClk` from the high-speed clock request that the guest itself writes to
+`CLKCTRL` bit 31. That behaviour was backported and does remove the loop; see
+`documentation/display.md`.
 
 ## Touch path
 
@@ -151,27 +151,30 @@ is therefore a guest-side effect, not a missing input path.
 
 ## Current bottleneck
 
-The blocking defect is the display-off transition. While input keeps arriving the
-guest stays on SpringBoard and reacts normally. When the guest switches the panel
-off, it waits on the DSI transmit-clock bit that the emulation never releases, and
-from that point the host burns a full core with no guest progress.
+The DSI transmit-clock wait described above is fixed and no longer occurs. See
+`documentation/display.md` for the register model, the upstream comparison and
+the backport.
 
-This is the same underlying gap as the known sleep and wake problem: the panel
-state machine does not exist, so every transition away from the initial
-configuration can block. It is not a general emulation speed problem. When the
-guest is running rather than spinning, host CPU sits around 26 percent, which
-leaves most of the core unused for actual guest work.
+After the panel is switched off the guest still settles into a kernel wait, but
+in different code: samples land at `0xc017b614`, `0xc0188cb0` and `0xc0066750`
+with return addresses `0xc017b904` and `0xc01882c0`. That is not an MMIO poll of
+the DSI shape. Host CPU still reaches about 99 percent in that state, so the
+display-off path passes the DSI handshake but does not yet return a usable guest.
+
+While the guest is running rather than stuck, host CPU sits well below a full
+core, so the emulation speed itself is not the limiting factor for interaction.
 
 ## Next steps
 
-1. Implement the DSI panel state machine rather than a single status bit: clock
-   start and stop, packet transmission, and the FIFO and interrupt behaviour that
-   accompanies them. The two one-bit experiments recorded above show that partial
-   models make things worse, not better.
-2. Re-measure the boot timeline and interaction latency once the display-off
-   transition completes.
+1. Determine what the guest waits for after the panel is switched off. The
+   sampled addresses are in kernel text, not a device base, so the next step is
+   to identify the function at `0xc017b614` and `0xc0188cb0` rather than to add
+   more device state.
+2. Re-measure the boot timeline and interaction latency once that wait is
+   resolved.
 3. Revisit the per-frame framebuffer invalidation, which copies 320x480 pixels on
-   every refresh, after the transition works.
+   every refresh.
+
 2. Re-measure the boot timeline once the wait terminates.
 3. Revisit the per-frame framebuffer invalidation, which copies 320x480 pixels on
    every refresh, after the guest reaches SpringBoard.
