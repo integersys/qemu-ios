@@ -1,97 +1,98 @@
 # Project status
 
-## Scope of the current task
-
-Establish a clean, lightweight postmarketOS host on the Young 2, rebuild
-QEMU-iOS for ARMv7, and confirm the previously working iPod touch 2G guest still
-boots. Sleep/wake, performance tuning, display redesign, audio, networking and
-OpenGL are out of scope for this task.
-
 ## Verified results
 
 | Item | State | Evidence |
 | --- | --- | --- |
-| postmarketOS boots on the device | verified | boots to a shell, `sshd` reachable over RNDIS at 172.16.42.1:2222 |
-| Host slimmed | verified | 444 MB used / 550 MB free, 131 MB RAM used, 105 processes |
-| Data partition usable | verified | 2.1 GB ext4 with 300,048 inodes, mounted at `/mnt/young2-data` |
-| X display at 320x480 | verified | `xrandr` reports `current 320 x 480`, depth 24, fb 32 bpp |
-| QEMU-iOS builds for ARMv7 | verified | `qemu-system-arm` 8.2.0, 15.5 MB stripped, runs on the device |
-| iPod touch 2G machine present | verified | `-M help` lists `iPod-Touch` |
+| postmarketOS boots on the device | verified | `sshd` reachable over RNDIS at 172.16.42.1:2222 |
+| Host slimmed | verified | 444 MB used / 550 MB free, 131 MB RAM used |
+| Data partition usable | verified | 2.1 GB ext4 with 300,048 inodes at `/mnt/young2-data` |
+| X display at 320x480 | verified | `xrandr` reports `current 320 x 480` |
+| QEMU-iOS builds for ARMv7 | verified | `qemu-system-arm` 8.2.0 runs on the device |
 | Guest reaches iBoot | verified | NOR image table in the serial log |
 | Guest reaches the XNU kernel | verified | `Darwin Kernel Version 9.4.1 ... RELEASE_ARM_S5L8720X` |
 | Guest reaches the NAND filesystem | verified | `FTL Register [OK]`, `BSD root: disk0s1` |
-| Guest reaches userspace | verified | `launchd`, `lockdownd`, `configd`, `notifyd`, `SpringBoard` in the task list |
-| Guest displays iOS | **not reached** | framebuffer stays black; guest panics at SpringBoard start |
-| Sleep/wake behaviour | not investigated | out of scope for this task |
+| Guest reaches userspace | verified | `configd` and `SCHelper` running in the serial log |
+| Guest draws to the framebuffer | verified | monitor screendump shows the Apple logo at 320x480 |
+| Kernel abort on SpringBoard start | resolved | `PM notification timeout` and the `AppleMPVDDriver` abort no longer occur |
+| SpringBoard interface visible | **not yet verified** | the guest stops after `SCHelper`; no SpringBoard UI observed |
+| Sleep/wake | not investigated | out of scope for this task |
 
-## Current blocker
+## The display defect that blocked boot
 
-The guest reaches SpringBoard and then takes a kernel data abort:
+The AppleMPVDDriver abort was a symptom, not the cause. Commit `bdec002822`
+moved the framebuffer invalidation out of `lcd_refresh()` and into
+`ipod_touch_lcd_realize()`:
 
 ```
-PM notification timeout (pid 10, SpringBoard)
-PM notification timeout (pid 10, SpringBoard)
-kernel abort type 4: fault_type=0x3, fault_addr=0xec3fd01c
-pc: 0xc04fef28  lr: 0xc04ff6b0  r11: 0xc0b60240
-Debugger message: Fatal Exception
+-    lcd->invalidate = 1;            in lcd_refresh()
++    s->invalidate = 1;              in ipod_touch_lcd_realize()
 ```
 
-`0xc0b60240` is the same object that appears earlier in the log as
-`AppleMPVDDriver[0xc0b60240]`, and the backtrace contains
-`AppleMPVDDriver::setPowerStateGated()`. The fault occurs in the video decoder
-driver while handling a power-management notification for SpringBoard,
-immediately after SpringBoard starts and before the LCD is programmed.
+`lcd_refresh()` only calls `framebuffer_update_memory_section()` when
+`lcd->invalidate` is set, and that call binds the console memory section to the
+guest framebuffer address in `w1_framebuffer_base`. Binding once in `realize()`
+binds it before the guest has programmed the base register, so the section stays
+at address 0 and is never rebound. The console reads guest physical address 0
+for the rest of the run and the display stays black.
 
-The boot was repeated after a full device power cycle and reproduced the same
-sequence and the same fault address, so the behaviour is deterministic.
+SpringBoard then blocks in its first draw and never acknowledges the
+power-management notification, which produced
+`PM notification timeout (pid 10, SpringBoard)` followed by the kernel data
+abort in `AppleMPVDDriver`.
 
-`hw/arm/ipod_touch_2g.c` instantiates no video decoder device at all; `mpvd`
-appears nowhere in `hw/` or `include/`. The driver therefore runs against
-unmapped guest physical addresses and reads zero from every register.
+The invalidation is restored in `lcd_refresh()`, and the memory section is also
+rebound whenever the guest writes a new framebuffer base:
 
-The display is never initialised, which is why the framebuffer stays black. The
-guest does probe LCD registers that the emulator does not implement
-(`0x300`, `0x304`, `0x410`, `0x1b18`, `0x1b1c`, `0x1b20`, `0x1b24`) and receives
-zero for all of them.
+```
+case 0x24:
+    if (s->w1_framebuffer_base != val) {
+        s->w1_framebuffer_base = val;
+        s->invalidate = 1;
+    }
+    break;
+```
 
-This is a guest-side crash reached through an incomplete emulation path. It is
-not a host configuration error: the same binary boots the same guest to the same
-point reproducibly, and the same abort occurs after a clean host reboot.
+With this change the guest no longer aborts and the framebuffer carries real
+guest output. A monitor screendump shows the Apple logo on a 320x480 surface,
+which no earlier build produced.
 
-## Guest memory size
+The per-frame invalidation costs a full 320x480 copy per refresh. Rebinding only
+when the base changes, without the per-frame flag, was also tested: it removes
+the abort but the console stops updating after the first frame. The per-frame
+invalidation is therefore kept, and the display cost is a known trade-off to
+revisit during performance work.
 
-`-m 128` matches the real iPod touch 2G and boots to SpringBoard.
+## Remaining blocker
 
-`-m 256` was tried because the upstream instructions use a much larger `-m`. It
-exceeds what the host can support: with 461 MB of RAM and a 256 MB swapfile on
-eMMC, the host stops responding entirely, the RNDIS gadget stops enumerating and
-the device requires a power cycle. Guest RAM must stay at or near 128 MB on this
-host.
+The guest reaches userspace and then stops:
 
-## Source defects found
+```
+configd[9]   ... SCPreferences(Embedded AirPort plug-in:com.apple.wifi.plist)
+SCHelper[15] <Debug>: processing command "EXIT"
+```
 
-`hw/arm/ipod_touch_lcd.c` does not compile as committed: two `fprintf` calls
-contain a literal newline inside the format string instead of `\n`. Both were
-repaired. Details are in `documentation/build.md`.
+After that point the serial log fills with USB OTG register dumps, the guest
+performs no further NAND reads, and no SpringBoard interface appears. Host CPU
+stays around 45 percent, so the guest is polling rather than blocked on I/O.
 
-## Unresolved questions
+The same USB polling appears throughout the historical logs in `D:\qemu` and was
+investigated there without a conclusion; `pre-usb-freeze.txt` and
+`guest-freeze-serial.txt` contain only raw dumps.
 
-- Whether the `AppleMPVDDriver` abort is specific to this NAND image
-  (OS 5F138 / XNU 1228.7.27) or would occur with an iOS 3.1.3 image. Only the
-  upstream `n72ap_v1` image is available to the project.
-- Whether the unimplemented LCD registers are required for the panel to be
-  programmed at all, or whether the abort happens first regardless.
-- Whether the abort is the known sleep/power problem, which this task was asked
-  not to investigate. The `PM notification timeout` lines and the
-  `setPowerStateGated` frame point at that subsystem.
+## Historical comparison
+
+`D:\qemu` was analysed as read-only evidence. The old source tree did not
+survive, but its recorded state, assets, binary and logs did. The conclusion: the
+old and current sources are equivalent, the guest assets are byte-identical, the
+preserved old binary reproduces the same failure, and the difference that matters
+is the LCD invalidation change described above.
 
 ## Next steps
 
-1. Determine whether the abort is specific to the power-management path, for
-   example by checking whether SpringBoard can reach its first draw when the
-   video decoder driver is prevented from registering.
-2. Confirm whether the same abort occurs with an iOS 3.1.3 NAND, which is the
-   documented preferred guest target.
-3. Instrument the LCD register reads to return plausible values instead of zero,
-   and check whether the display initialises before the power-state transition.
-4. Only after the guest reaches the interface, revisit the sleep/wake problem.
+1. Determine what the guest waits for at the `SCHelper` stage. The USB OTG
+   register polling is the only activity and is the obvious lead.
+2. Confirm whether the same stall occurs with the VNC backend and without the X
+   server, which is closer to the historical configuration.
+3. Revisit the per-frame display copy once the interface is confirmed.
+4. Sleep and wake remain unimplemented.
