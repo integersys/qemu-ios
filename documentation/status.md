@@ -15,7 +15,9 @@
 | Guest reaches userspace | verified | `configd` and `SCHelper` running in the serial log |
 | Guest draws to the framebuffer | verified | monitor screendump shows the Apple logo at 320x480 |
 | Kernel abort on SpringBoard start | resolved | `PM notification timeout` and the `AppleMPVDDriver` abort no longer occur |
-| SpringBoard interface visible | **not yet verified** | the guest stops after `SCHelper`; no SpringBoard UI observed |
+| SpringBoard interface visible | verified | home screen with icons and dock on screen; guest raised its own `Edit Home Screen` dialog in response to taps |
+| Touch input reaches the guest | verified | `INPUTTRACE` events in the emulator output; SpringBoard reacted to them |
+| Display-off transition | **open** | guest waits on a DSI transmit-clock bit that is never released; host burns a full core |
 | Sleep/wake | not investigated | out of scope for this task |
 
 ## The display defect that blocked boot
@@ -65,20 +67,14 @@ revisit during performance work.
 
 ## Remaining blocker
 
-The guest reaches userspace and then stops:
+SpringBoard is reached and stays usable while input keeps arriving. The blocker
+is the display-off transition. When the guest switches the panel off it waits on
+the MIPI DSI transmit-clock status bit, which the emulation asserts permanently,
+and never returns. Host CPU then sits at about 99 percent with no guest progress.
 
-```
-configd[9]   ... SCPreferences(Embedded AirPort plug-in:com.apple.wifi.plist)
-SCHelper[15] <Debug>: processing command "EXIT"
-```
-
-After that point the serial log fills with USB OTG register dumps, the guest
-performs no further NAND reads, and no SpringBoard interface appears. Host CPU
-stays around 45 percent, so the guest is polling rather than blocked on I/O.
-
-The same USB polling appears throughout the historical logs in `D:\qemu` and was
-investigated there without a conclusion; `pre-usb-freeze.txt` and
-`guest-freeze-serial.txt` contain only raw dumps.
+`documentation/performance.md` records the measurement, the program counter
+sampling that located the loop, the address translation that identified the
+device, and the two one-bit models that were tested and rejected.
 
 ## Historical comparison
 
@@ -90,9 +86,10 @@ is the LCD invalidation change described above.
 
 ## Next steps
 
-1. Determine what the guest waits for at the `SCHelper` stage. The USB OTG
-   register polling is the only activity and is the obvious lead.
-2. Confirm whether the same stall occurs with the VNC backend and without the X
-   server, which is closer to the historical configuration.
-3. Revisit the per-frame display copy once the interface is confirmed.
-4. Sleep and wake remain unimplemented.
+1. Implement the MIPI DSI panel state machine so the display-off transition
+   completes. A single status bit is not sufficient, as the two rejected
+   experiments in `documentation/performance.md` show.
+2. Re-measure boot time and interaction latency once that transition works.
+3. Revisit the per-frame display copy once the transition is stable.
+4. Sleep and wake remain unimplemented and are the same underlying gap as the
+   display-off transition.
