@@ -55,7 +55,10 @@ static void ipod_touch_lcd_write(void *opaque, hwaddr addr, uint64_t val, unsign
             s->w1_display_depth_info = val;
             break;
         case 0x24:
-            s->w1_framebuffer_base = val;
+            if (s->w1_framebuffer_base != val) {
+                s->w1_framebuffer_base = val;
+                s->invalidate = 1;
+            }
             break;
         case 0x28:
             s->w1_hspan = val;
@@ -128,6 +131,8 @@ static void lcd_refresh(void *opaque)
 
     src_width =  4 * width;
     linesize = surface_stride(surface);
+
+    lcd->invalidate = 1;
 
     if(lcd->invalidate) {
         framebuffer_update_memory_section(&lcd->fbsection, lcd->sysmem, lcd->w1_framebuffer_base, height, 4 * width);
