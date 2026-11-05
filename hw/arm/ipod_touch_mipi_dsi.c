@@ -34,7 +34,6 @@ static uint64_t ipod_touch_mipi_dsi_read(void *opaque, hwaddr addr, unsigned siz
 static void ipod_touch_mipi_dsi_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
 {
     IPodTouchMIPIDSIState *s = (IPodTouchMIPIDSIState *)opaque;
-    fprintf(stderr, "%s: writing 0x%08lx to 0x%08lx\n", __func__, val, addr);
 
     switch(addr)
     {
