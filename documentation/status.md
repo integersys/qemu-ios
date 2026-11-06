@@ -18,6 +18,11 @@
 | SpringBoard interface visible | verified | home screen with icons and dock on screen; guest raised its own `Edit Home Screen` dialog in response to taps |
 | Touch input reaches the guest | verified | `INPUTTRACE` events in the emulator output; SpringBoard reacted to them |
 | Display-off transition | **open** | guest waits on a DSI transmit-clock bit that is never released; host burns a full core |
+| Emulator exit | root cause identified | `SIGSEGV` core shows `ipod_touch_multitouch_transfer` writing `in_buffer[in_buffer_ind]` past its allocation; `SIGILL` runs are consistent with the same corruption but were not captured |
+| LDRD / TCG encoding | ruled out | QEMU 8.2.0 guard from upstream `76cff100be` is present in `tcg/arm/tcg-target.c.inc` |
+| Multitouch input bound | fixed, under test | unbounded write into the input buffer and stale frame hand-over removed; upstream documents the same defect |
+| Emulator runtime stability | 6037 s controlled run, no crash | 0 digitizer deaths, 14 taps, RSS 191 MB; previous worst case 2392 s |
+| Frame poll command | fixed, under test | iOS 3.1.3 polls with `0xEB`, which the fork never answered |
 | Sleep/wake | not investigated | out of scope for this task |
 
 ## The display defect that blocked boot
@@ -65,16 +70,38 @@ the abort but the console stops updating after the first frame. The per-frame
 invalidation is therefore kept, and the display cost is a known trade-off to
 revisit during performance work.
 
-## Remaining blocker
+## Remaining blockers
 
-SpringBoard is reached and stays usable while input keeps arriving. The blocker
-is the display-off transition. When the guest switches the panel off it waits on
-the MIPI DSI transmit-clock status bit, which the emulation asserts permanently,
-and never returns. Host CPU then sits at about 99 percent with no guest progress.
+SpringBoard is reached and stays usable while input keeps arriving. Two
+independent problems remain.
 
-`documentation/performance.md` records the measurement, the program counter
-sampling that located the loop, the address translation that identified the
-device, and the two one-bit models that were tested and rejected.
+The first is the display-off transition. When the guest switches the panel off
+it waits on a guest-internal completion flag, held in kernel data and polled
+through a virtual call; the thread that would set it never runs, so the guest
+does not return. This is not a device register that emulation can satisfy, and
+the power-management register file that upstream keeps did not remove it.
+
+The second is the emulator itself. It was killed by `SIGILL` (exit status 132)
+in some runs and by `SIGSEGV` (exit status 139) in another, which already argues
+against a single bad instruction. The `SIGSEGV` run left a core: the fault is
+`strb` inside `ipod_touch_multitouch_transfer`, writing
+`s->in_buffer[s->in_buffer_ind]` with an index of 9952 against a 256-byte
+allocation, past the end of the mapping. The `SIGILL` runs are consistent with
+the same corruption reaching code rather than data, but no core was captured for
+them. `documentation/host-crashes.md` holds the full record.
+
+The QEMU issue #896 `LDRD` defect does not apply here: this tree is QEMU 8.2.0
+and already carries the guard from upstream `76cff100be`, and the remaining
+`LDRD` emissions use fixed register pairs.
+
+A run with no touch input at all never reached SpringBoard: it stayed on the
+Apple logo for over 2000 seconds while `configd` ran, the USB OTG driver printed
+register dumps periodically, and the digitizer killed itself with
+`Too many errors performing control write`. Whether that stall is caused by the
+digitizer failure or is independent of it is unresolved.
+
+`documentation/display.md` records the MIPI DSI register model, the two one-bit
+models that were tested and rejected, and the multitouch frame ownership defect.
 
 ## Historical comparison
 
@@ -86,10 +113,15 @@ is the LCD invalidation change described above.
 
 ## Next steps
 
-1. Implement the MIPI DSI panel state machine so the display-off transition
-   completes. A single status bit is not sufficient, as the two rejected
-   experiments in `documentation/performance.md` show.
-2. Re-measure boot time and interaction latency once that transition works.
-3. Revisit the per-frame display copy once the transition is stable.
-4. Sleep and wake remain unimplemented and are the same underlying gap as the
+1. Measure the multitouch frame ownership fix on the device: the digitizer should
+   stay alive after its firmware download and SpringBoard should react to a
+   single deliberate tap without the device being killed.
+2. Capture the faulting address of the `SIGILL`, by running the emulator under a
+   tracer that records `si_addr`, to confirm or reject heap corruption as the
+   cause.
+3. Identify the guest completion flag that the display-off path waits on, and
+   what is supposed to set it.
+4. Re-measure boot time and interaction latency, then revisit the per-frame
+   display copy.
+5. Sleep and wake remain unimplemented and are the same underlying gap as the
    display-off transition.

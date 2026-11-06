@@ -52,6 +52,12 @@ OBJECT_DECLARE_SIMPLE_TYPE(IPodTouchMultitouchState, IPOD_TOUCH_MULTITOUCH)
 #define MT_CMD_SHORT_CONTROL_WRITE   0xE4
 #define MT_CMD_SHORT_CONTROL_READ    0xE6
 #define MT_CMD_FRAME_READ            0xEA
+/*
+ * iOS 3.1.3's AppleMultitouchZ2SPI polls the panel with 0xEB, not 0xEA: the
+ * observed cycle is 0xEB, then 0xEC and 0x01, repeating. Treating 0xEB as an
+ * unknown command leaves every poll unanswered and the byte stream shifted.
+ */
+#define MT_CMD_FRAME_READ_V2         0xEB
 
 // frame types
 #define MT_FRAME_TYPE_PATH 0x44
@@ -139,6 +145,7 @@ typedef struct IPodTouchMultitouchState {
     uint32_t buf_size;
     uint32_t buf_ind;
     uint32_t in_buffer_ind;
+    uint32_t in_buffer_size;
     uint8_t hbpp_atn_ack_response[2];
     MTFrame *next_frame;
     uint32_t frame_counter;
