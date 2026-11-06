@@ -302,9 +302,14 @@ work.
 
 The changes above are statically verified against the upstream implementation.
 On the device, the digitizer now survives its firmware download and stays alive
-across taps, which the previous binary did not manage. A screenshot of
-SpringBoard reacting to a tap under this build has not been captured yet, so the
-input path is not yet physically verified end to end.
+across taps, which the previous binary did not manage.
+
+A run with the poll fix and one tap every 120 seconds logged no unknown commands
+at all over 1096 seconds and never killed the digitizer, but the backlight had
+dimmed to 1 by then and a tap did not bring it back. The guest accepts the frame
+stream now; whether it turns those frames into HID events that reach SpringBoard
+is still unresolved, and the frame content is the next thing to compare against
+the upstream implementation.
 
 ### Emulator exits
 

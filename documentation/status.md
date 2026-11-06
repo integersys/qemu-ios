@@ -22,7 +22,7 @@
 | LDRD / TCG encoding | ruled out | QEMU 8.2.0 guard from upstream `76cff100be` is present in `tcg/arm/tcg-target.c.inc` |
 | Multitouch input bound | fixed, under test | unbounded write into the input buffer and stale frame hand-over removed; upstream documents the same defect |
 | Emulator runtime stability | 6037 s controlled run, no crash | 0 digitizer deaths, 14 taps, RSS 191 MB; previous worst case 2392 s |
-| Frame poll command | fixed, under test | iOS 3.1.3 polls with `0xEB`, which the fork never answered |
+| Frame poll command | fixed, partially verified | iOS 3.1.3 polls with `0xEB`, which the fork never answered; with it answered a 1096 s run logged no unknown commands, but taps still did not wake the dimmed panel |
 | Sleep/wake | not investigated | out of scope for this task |
 
 ## The display defect that blocked boot
