@@ -88,16 +88,93 @@ to switch the panel off (`ApplePinotLCD::_lcdEnable: enable: 0` is reached).
 
 ### What remains
 
-After the panel is switched off the guest still settles into a kernel wait, but
-in different code: samples land at `0xc017b614`, `0xc0188cb0` and `0xc0066750`
-with return addresses `0xc017b904` and `0xc01882c0`, and the sampled registers
-point at kernel text rather than a device base. That is not the DSI poll, and it
-is not an MMIO wait of the same shape. The host still reaches about 99 percent CPU
-in that state.
+After the panel is switched off the guest still settles into a wait, but in
+different code: samples land at `0xc017b614`, `0xc0188cb0` and `0xc0066750` with
+return addresses `0xc017b904` and `0xc01882c0`, and the sampled registers point
+at kernel text rather than a device base.
 
-So the display-off path now passes the DSI handshake but still does not return to
-a usable guest. Sleep and wake remain unimplemented, as before; this is the same
-underlying gap.
+Disassembling the caller shows a virtual-call poll, not a register read:
+
+```
+c017b8f4  ldr r4, [pc, #0x24]     r4 = address of the global at 0xc02065a8
+c017b8f8  ldr r3, [r4]            r3 = *(0xc02065a8)
+c017b8fc  mov lr, pc
+c017b900  ldr pc, [r3, #0x10]     call the object's vtable entry at +0x10
+c017b904  cmp r0, #0
+c017b908  beq c017b8f4            retry while the call returns zero
+```
+
+The callee is the accessor at `0xc017b60c`:
+
+```
+c017b60c  ldr r3, [pc, #12]       r3 = address of the global at 0xc02065b0
+c017b610  ldr r3, [r3]            r3 = *(0xc02065b0)
+c017b614  ldr r0, [r3, #0x10]     r0 = *(r3 + 0x10)
+c017b618  and r0, r0, #1
+c017b61c  bx lr
+```
+
+So the guest polls bit 0 of a software flag at `*(0xc02065b0) + 0x10`, through
+an object held in a second global. Both addresses are kernel data, not device
+registers, so this is a guest-internal completion flag and not something device
+emulation can satisfy directly.
+
+## Power management
+
+### PMU register file
+
+The PMU at `hw/arm/ipod_touch_pcf50633_pmu.c` implements no register file at all:
+every I2C write is discarded and `pcf50633_recv()` returns zero for any register
+that is not one of the RTC, charger or identity cases.
+
+The maintained upstream tree keeps a register file and returns the last value the
+guest wrote, and its comment records the consequence of the stub behaviour:
+
+> A stateless stub that always returned 0 here caused iOS's sleep sequence to
+> never observe the power-state transition it had just requested, making it fall
+> through into a reset instead of suspending.
+
+That is a plausible match for the stall above, so the register file was
+backported and measured.
+
+Result: the guest booted to userspace, but the stall moved rather than
+disappeared. Program counters that previously sat in the flag poll at
+`0xc017b8f4` with 99 percent host CPU instead landed in a kernel delay loop at
+`0xc005ffac` (`subs`/`bne` around cache-maintenance operations) with 64 percent
+host CPU, and the guest survived longer before the emulator exited. The panel
+still did not return to SpringBoard.
+
+The change was therefore reverted: it is defensible on upstream evidence, but it
+did not produce a verified improvement here, and the last configuration that
+demonstrably rendered SpringBoard is the one to keep. It remains the first
+candidate to retry once the exit behaviour below is understood.
+
+### Multitouch frame corruption from repeated taps
+
+A keep-alive loop left running across several sessions was tapping the centre of
+the screen every 45 seconds. With that loop active the guest logged:
+
+```
+AppleMultitouchZ2SPI:  Could not detect HBPP. Response: ...
+AppleMultitouchZ2SPI: *** Killing device (#3): Too many errors reading a frame of data ***
+AppleMultitouchZ2SPI: kIOReturnError: 6 times
+```
+
+The emulated multitouch device does not produce frames the guest accepts when
+touches arrive in quick succession, and the driver eventually kills the device.
+Repeated blind tapping is therefore harmful, not merely imprecise. Interaction
+must be deliberate and sparse, and the emulated frame format is a real defect
+worth fixing separately.
+
+### Emulator exits
+
+The emulator exits cleanly at unpredictable points, observed between roughly 560
+and 1580 seconds after launch, with no OOM record, no segfault, no core file and
+no shutdown request in the guest serial log. Host memory is not exhausted when it
+happens. Whether the guest is requesting a power-off that the machine does not
+model, or whether the exit comes from the display backend, is unresolved. The
+exit status has not yet been captured.
+
 
 ### Debug output
 
